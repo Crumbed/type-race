@@ -8,6 +8,7 @@
 use std::fmt::Display;
 use std::io::{self, Stdout};
 use std::io::Write;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use termion;
@@ -28,28 +29,26 @@ fn main() -> io::Result<()> {
         .into_raw_mode()
         .expect("Failed to get raw mode");
 
-    write!(out,
-        "{}{}{text}{}",
-        termion::clear::All,
-        Goto(1, 1),
-        Goto(1, 2),
-    )?;
+    write!(out, "{}{}Press Enter to start...", Goto(1, 1), termion::clear::All)?;
     out.flush()?;
 
     
     let mut keys = io::stdin().keys();
     let mut validations = vec![];
-    let mut time: Option<Instant> = Option::None;
+    let mut time = Instant::now();
+    let mut started = false;
+    let mut wpm = 0;
 
     while let Some(Ok(key)) = keys.next() {
         match key {
             Key::Ctrl('c') => break,
+            Key::Char('\n') if !started => {
+                start(&mut out, &text)?;
+                time = Instant::now();
+                started = true;
+            },
 
-            Key::Char(c) => {
-                if time.is_none() {
-                    time = Some(Instant::now());
-                }
-
+            Key::Char(c) if started => {
                 let charat = text
                     .chars()
                     .nth(validations.len())
@@ -74,11 +73,7 @@ fn main() -> io::Result<()> {
                 }
             },
             
-            Key::Backspace => {
-                if time.is_none() {
-                    time = Some(Instant::now());
-                }
-
+            Key::Backspace if started => {
                 validations.pop();
                 write!(out, "{}{} {}", 
                     Fg(Reset),
@@ -91,36 +86,53 @@ fn main() -> io::Result<()> {
             _ => (),
         }
 
-        debug(&mut out, &validations)?;
+        wpm = calc_wpm(&validations, time.elapsed());
+        write!(out, "{}{}{}{}{}WPM: {wpm}{}{}",
+            cursor::Save,
+            cursor::Hide,
+            Goto(1, 3),
+            Fg(Reset),
+            termion::clear::AfterCursor,
+            cursor::Restore,
+            cursor::Show,
+        )?;
         out.flush()?;
     }
 
-
-    let time = time.unwrap().elapsed();
-    let wpm = calc_wpm(&validations, time);
-    write!(out, "{}{}WPM: {wpm}", Goto(1, 3), Fg(Reset))?;
+    write!(out, "{}{}{}WPM: {wpm}{}",
+        Goto(1, 3),
+        Fg(Reset),
+        termion::clear::AfterCursor,
+        Goto(1, 4),
+    )?;
     out.flush()?;
+
     Ok(())
 }
 
-fn debug(
-    out: &mut RawTerminal<Stdout>,
-    validations: &Vec<Validation>,
-) -> io::Result<()> {
-    write!(out, "{}{}{}{}Validations: ", 
-        cursor::Save,
-        cursor::Hide,
-        Goto(1, 5),
-        termion::clear::AfterCursor
+fn start(out: &mut RawTerminal<Stdout>, text: &str) -> io::Result<()> {
+    write!(out,
+        "{}{text}{}",
+        Goto(1, 1),
+        Goto(1, 2),
     )?;
-    for v in validations {
-        write!(out, "{}*", v)?;
+    out.flush()?;
+
+    for i in 1..=3 {
+        write!(out, "{}Start in: {}{}", 
+            termion::clear::CurrentLine,
+            4 - i,
+            Goto(1, 2)
+        )?;
+        out.flush()?;
+        thread::sleep(Duration::from_secs(1));
     }
 
-    write!(out, "{}{}", cursor::Restore, cursor::Show)?;
+    write!(out, "{}", termion::clear::CurrentLine)?;
     out.flush()?;
     Ok(())
 }
+
 
 
 fn calc_wpm(
